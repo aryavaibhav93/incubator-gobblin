@@ -23,7 +23,6 @@ import java.util.Iterator;
 import java.util.List;
 import java.util.Map;
 import java.util.Optional;
-import java.util.Properties;
 import java.util.Set;
 import java.util.concurrent.TimeUnit;
 import java.util.concurrent.TimeoutException;
@@ -47,15 +46,11 @@ import org.apache.helix.task.WorkflowConfig;
 import org.apache.helix.task.WorkflowContext;
 import org.apache.helix.tools.ClusterSetup;
 
-import com.typesafe.config.Config;
-import com.typesafe.config.ConfigFactory;
-
 import lombok.extern.slf4j.Slf4j;
 
 import org.apache.gobblin.configuration.ConfigurationKeys;
 import org.apache.gobblin.runtime.JobException;
 import org.apache.gobblin.runtime.listeners.JobListener;
-import org.apache.gobblin.util.ConfigUtils;
 
 import static org.apache.helix.task.TaskState.STOPPED;
 
@@ -127,8 +122,7 @@ public class HelixUtils {
   static void waitJobInitialization(
       HelixManager helixManager,
       String workFlowName,
-      String jobName,
-      long timeoutMillis) throws Exception {
+      String jobName) throws Exception {
     WorkflowContext workflowContext = TaskDriver.getWorkflowContext(helixManager, workFlowName);
 
     // If the helix job is deleted from some other thread or a completely external process,
@@ -137,13 +131,14 @@ public class HelixUtils {
     // 2) it did get initialized but deleted soon after, in which case we should stop waiting
     // To overcome this issue, we wait here till workflowContext gets initialized
     long start = System.currentTimeMillis();
+    long timeoutMillis = TimeUnit.MINUTES.toMillis(5L);
     while (workflowContext == null || workflowContext.getJobState(TaskUtil.getNamespacedJobName(workFlowName, jobName)) == null) {
       if (System.currentTimeMillis() - start > timeoutMillis) {
         log.error("Job cannot be initialized within {} milliseconds, considered as an error", timeoutMillis);
         throw new JobException("Job cannot be initialized within {} milliseconds, considered as an error");
       }
       workflowContext = TaskDriver.getWorkflowContext(helixManager, workFlowName);
-      Thread.sleep(1000);
+      Thread.sleep(TimeUnit.SECONDS.toMillis(1L));
       log.info("Waiting for work flow initialization.");
     }
 
@@ -164,7 +159,7 @@ public class HelixUtils {
     helixTaskDriver.start(workFlow);
     log.info("Created a work flow {}", workFlowName);
 
-    waitJobInitialization(helixManager, workFlowName, jobName, Long.MAX_VALUE);
+    waitJobInitialization(helixManager, workFlowName, jobName);
   }
 
   static void waitJobCompletion(HelixManager helixManager, String workFlowName, String jobName,
@@ -194,7 +189,7 @@ public class HelixUtils {
           return;
           case STOPPING:
             log.info("Waiting for job {} to complete... State - {}", jobName, jobState);
-            Thread.sleep(1000);
+            Thread.sleep(TimeUnit.SECONDS.toMillis(1L));
             // Workaround for a Helix bug where a job may be stuck in the STOPPING state due to an unresponsive task.
             if (System.currentTimeMillis() > stoppingStateEndTime) {
               log.info("Deleting workflow {}", workFlowName);
@@ -204,7 +199,7 @@ public class HelixUtils {
             return;
           default:
             log.info("Waiting for job {} to complete... State - {}", jobName, jobState);
-            Thread.sleep(1000);
+            Thread.sleep(TimeUnit.SECONDS.toMillis(10L));
         }
       } else {
         // We have waited for WorkflowContext to get initialized,
@@ -323,19 +318,6 @@ public class HelixUtils {
       }
     }
     return jobNameToWorkflowId;
-  }
-
-  /**
-   * Return the system properties from the input {@link Config} instance
-   * @param config
-   */
-  public static void setSystemProperties(Config config) {
-    Properties properties = ConfigUtils.configToProperties(ConfigUtils.getConfig(config, GobblinClusterConfigurationKeys.GOBBLIN_CLUSTER_SYSTEM_PROPERTY_PREFIX,
-        ConfigFactory.empty()));
-
-    for (Map.Entry<Object, Object> entry: properties.entrySet()) {
-      System.setProperty(entry.getKey().toString(), entry.getValue().toString());
-    }
   }
 
   /**
